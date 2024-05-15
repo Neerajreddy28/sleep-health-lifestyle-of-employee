@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+  <style>
+
+    h3{
+      padding-top: 10px;
+    }
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    .heatmapContainer {
+      display: flex;
+      flex-direction: wrap;
+      align-items: center;
+    }
+
+    /* Add CSS styles for the heatmap */
+    .heatmap-cell {
+      stroke: #fff;
+      stroke-width: 1px;
+    }
+
+    .line {
+      fill: none;
+      stroke-width: 2px;
+    }
+
+    .experience-line {
+      stroke: #4285F4;
+    }
+
+    .stress-line {
+      stroke: #EA4335;
+    }
+
+    #heatmap-tooltip {
+      position: absolute;
+      visibility: hidden;
+      width: 400px;
+      /* Adjust as necessary */
+      height: 300px;
+      /* Adjust as necessary */
+      background-color: white;
+      border: 1px solid #d9d9d9;
+      padding: 10px;
+      border-radius: 5px;
+      pointer-events: none;
+      /* Ensure it doesn't interfere with other interactions */
+    }
+  </style>
+</head>
+
+<body>
+  <h1>SLEEP HEALTH AND LIFESTYLE INSIGHT OF AN EMPLOYEE</h1>
+
+    <h3> AGE AND SLEEP DURATION DISTRIBUTION BY GENDER </h3>
+    <div id="main" style="width: 800px; height: 600px; "></div>
+    <div id="age-range-selectors">
+      <input type="checkbox" id="range10-20" name="ageRange" value="10-20">
+      <label for="range10-20">10-20</label>
+      <input type="checkbox" id="range20-30" name="ageRange" value="20-30">
+      <label for="range20-30">20-30</label>
+      <input type="checkbox" id="range30-40" name="ageRange" value="30-40">
+      <label for="range30-40">30-40</label>
+      <input type="checkbox" id="range40-50" name="ageRange" value="40-50">
+      <label for="range40-50">40-50</label>
+      <input type="checkbox" id="range50-60" name="ageRange" value="50-60">
+      <label for="range50-60">50-60</label>
+    </div>
+
+    <h3>SLEEP DISORDER PREVALENCE BY GENDER</h3>
+  <div class="heatmapContainer">
+    <svg id="heatmapSvg" width="800" height="600" style="margin-top: 50px;"></svg>
+    <div id="heatmap-tooltip"
+      style="position: absolute; visibility: hidden; width: 400px; height: 300px; background-color: white; border: 1px solid #d9d9d9; padding: 10px; border-radius: 5px;">
+    </div>
+    <svg id="heatLegendSvg" width="200" height="400" style="margin-top: 20px;"></svg>
+  </div>
+
+    <!--Line Chart -->
+    <h3>STRESS LANDSCAPE OVER THE CAREER LIFESPAN </h3>
+    <svg id="lineChart" width="800" height="500" style="margin-top: 20px;"></svg>
+    <div id="tooltip" style="position: absolute; visibility: hidden; background-color: lightgrey; padding: 5px; border-radius: 5px;"></div>
+
+
+  
+
+  <script>
+    // Common margins and dimensions
+    var margin = { top: 20, right: 20, bottom: 30, left: 40 },
+      width = 800 - margin.left - margin.right,
+      height = 500 - margin.top - margin.bottom;
+
+    // Scales and axes setup for Line Chart
+    var xLine = d3.scaleLinear().rangeRound([0, width]),
+      yLine = d3.scaleLinear().rangeRound([height, 0]),
+      xAxisLine = d3.axisBottom(xLine),
+      yAxisLine = d3.axisLeft(yLine);
+
+    Promise.all([
+      d3.csv('https://raw.githubusercontent.com/Kruthikareddymurthy/project/main/Employee.csv'),
+      d3.csv('https://raw.githubusercontent.com/Kruthikareddymurthy/project/main/Sleep_health_and_lifestyle_dataset.csv')
+    ]).then(function (files) {
+      var employeeData = files[0];
+      var sleepData = files[1];
+
+      // Extract and combine age data
+      var combinedAges = employeeData.map(d => +d.Age).concat(sleepData.map(d => +d.Age));
+
+      combinedAges.sort((a, b) => a - b);
+
+      var employeeGenders = employeeData.map(d => d.Gender);
+      var sleepGenders = sleepData.map(d => d.Gender);
+      var combinedGenders = employeeGenders.concat(sleepGenders).slice(0, combinedAges.length);
+
+      var sleepDurations = sleepData.map(d => +d['Sleep Duration']);
+      var sleepDisorders = sleepData.map(d => d['Sleep Disorder']);
+
+
+      var combinedData = combinedAges.map((age, i) => {
+        return {
+          age: age,
+          sleepDuration: sleepDurations[i % sleepDurations.length],
+          sleepDisorders: sleepDisorders[i % sleepDisorders.length],
+          gender: combinedGenders[i] // Include gender
+        };
+      });
+
+      // Group and average 'Experience in Current Domain' and 'Stress Level' by age and gender (for line chart)
+      var experienceData = Array.from(
+        d3.rollup(employeeData,
+          v => d3.mean(v, d => d.ExperienceInCurrentDomain),
+          d => d.Age,
+          d => d.Gender)
+      ).map(([age, genders]) => {
+        return Array.from(genders, ([gender, avgExperience]) => ({ Age: age, Gender: gender, Value: avgExperience }));
+      }).flat();
+      experienceData.sort((a, b) => d3.ascending(a.Age, b.Age));
+      console.log(experienceData);
+
+      var stressData = Array.from(
+        d3.rollup(sleepData,
+          v => d3.mean(v, d => d['Stress Level']),
+          d => d.Age,
+          d => d.Gender)
+      ).map(([age, genders]) => {
+        return Array.from(genders, ([gender, avgStress]) => ({ Age: age, Gender: gender, Value: avgStress }));
+      }).flat();
+
+      //Scatter Plot
+      const maleData = combinedData
+        .filter(d => d.gender === 'Male')
+        .map(d => [+d.age, +d.sleepDuration]); // Convert strings to numbers 
+
+      const femaleData = combinedData
+        .filter(d => d.gender === 'Female')
+        .map(d => [+d.age, +d.sleepDuration]); // Convert strings to numbers
+      console.log(femaleData);
+      console.log(combinedData);
+
+      // Now, we can set up the ECharts option with the processed data
+      const option = {
+        title: {
+          subtext: 'Sleep Duration'
+        },
+        grid: {
+          left: '3%',
+          right: '7%',
+          bottom: '7%',
+          containLabel: true
+        },
+        tooltip: {
+          showDelay: 0,
+          formatter: function (params) {
+            if (params.value.length > 1) {
+              return (
+                params.seriesName +
+                ' :<br/>' +
+                'Age: ' + params.value[0] +
+                ' years<br/>Sleep Duration: ' + params.value[1] +
+                ' hours'
+              );
+            } else {
+              return (
+                params.seriesName +
+                ' :<br/>' +
+                params.name +
+                ' : ' +
+                params.value +
+                ' hours'
+              );
+            }
+          },
+          axisPointer: {
+            show: true,
+            type: 'cross',
+            lineStyle: {
+              type: 'dashed',
+              width: 1
+            }
+          }
+        },
+        toolbox: {
+          feature: {
+            dataZoom: {},
+            brush: {
+              type: ['rect', 'polygon', 'clear']
+            }
+          }
+        },
+        brush: {},
+        legend: {
+          data: ['Female', 'Male'],
+          left: 'center',
+          bottom: 10
+        },
+        xAxis: [
+          {
+            type: 'value',
+            scale: true,
+            axisLabel: {
+              formatter: '{value} years'
+            },
+            splitLine: {
+              show: false
+            },
+            name: 'Age', 
+            nameLocation: 'end',
+            nameTextStyle: {
+            padding: [0, 0, -20, 0]
+          }
+        }
+        ],
+        yAxis: [
+          {
+            type: 'value',
+            scale: true,
+            axisLabel: {
+              formatter: '{value} hours'
+            },
+            splitLine: {
+              show: false
+            }
+          }
+        ],
+        series: [
+          {
+            name: 'Female',
+            type: 'scatter',
+            emphasis: {
+              focus: 'series'
+            },
+            data: femaleData, // TODO: Insert your actual female data array here
+            markArea: {
+              silent: true,
+              itemStyle: {
+                color: 'transparent',
+                borderWidth: 1,
+                borderType: 'dashed'
+              },
+              data: [
+                [
+                  {
+                    name: '                     Female Data Range',
+                    xAxis: 'min',
+                    yAxis: 'min'
+                  },
+                  {
+                    xAxis: 'max',
+                    yAxis: 'max'
+                  }
+                ]
+              ]
+            },
+            markPoint: {
+              data: [
+                { type: 'max', name: 'Max' },
+                { type: 'min', name: 'Min' }
+              ]
+            },
+            markLine: {
+              lineStyle: {
+                type: 'solid'
+              },
+              data: [
+                { type: 'average', name: 'Average' }
+              ]
+            }
+          },
+          {
+            name: 'Male',
+            type: 'scatter',
+            emphasis: {
+              focus: 'series'
+            },
+            data: maleData, // TODO: Insert your actual male data array here
+            markArea: {
+              silent: true,
+              itemStyle: {
+                color: 'transparent',
+                borderWidth: 1,
+                borderType: 'dashed'
+              },
+              data: [
+                [
+                  {
+                    name: 'Male Data Range',
+                    xAxis: 'min',
+                    yAxis: 'min'
+                  },
+                  {
+                    xAxis: 'max',
+                    yAxis: 'max'
+                  }
+                ]
+              ]
+            },
+            markPoint: {
+              data: [
+                { type: 'max', name: 'Max' },
+                { type: 'min', name: 'Min' }
+              ]
+            },
+            markLine: {
+              lineStyle: {
+                type: 'solid'
+              },
+              data: [
+                { type: 'average', name: 'Average' }
+              ]
+            }
+          }
+        ]
+      };
+      const echartDiv = document.getElementById('main');
+      const myChart = echarts.init(echartDiv);
+      myChart.setOption(option);
+
+      // Function to filter data based on selected age ranges
+      function filterDataByAgeRange(selectedRanges) {
+        return combinedData.filter(d => {
+          return selectedRanges.some(range => {
+            const [minAge, maxAge] = range.split('-').map(Number);
+            return d.age >= minAge && d.age < maxAge;
+          });
+        });
+      }
+
+      // Function to update the scatter plot
+      function updateScatterPlot(data) {
+        // Assuming you have a scatter plot setup, update it with the filtered data
+        // For instance, you might have something like this:
+        myChart.setOption({
+          series: [{
+            // Assuming you have a setup similar to your existing 'Female' and 'Male' series
+            name: 'Female',
+            data: data.filter(d => d.gender === 'Female').map(d => [d.age, d.sleepDuration]),
+          }, {
+            name: 'Male',
+            data: data.filter(d => d.gender === 'Male').map(d => [d.age, d.sleepDuration]),
+          }]
+        });
+      }
+
+      // Event listener for checkbox changes
+      d3.selectAll("#age-range-selectors input[type=checkbox]").on("change", function () {
+        // Get the selected age ranges
+        var selectedRanges = d3.selectAll("#age-range-selectors input[type=checkbox]:checked")
+          .nodes()
+          .map(d => d.value);
+
+        // Filter the data based on the selected age ranges
+        var filteredData = filterDataByAgeRange(selectedRanges);
+
+        // Update the scatter plot with the filtered data
+        updateScatterPlot(filteredData);
+      });
+
+      // Prepare data for the heatmap
+      var genderSleepDisorderMap = {};
+      sleepData.forEach(function (d) {
+        var key = d.Gender + '-' + d['Sleep Disorder'];
+        genderSleepDisorderMap[key] = (genderSleepDisorderMap[key] || 0) + 1;
+      });
+
+      var heatmapData = [];
+      for (var key in genderSleepDisorderMap) {
+        var parts = key.split('-');
+        heatmapData.push({
+          gender: parts[0],
+          sleepDisorder: parts[1],
+          count: genderSleepDisorderMap[key]
+        });
+      }
+
+      // Create heatmap
+      var heatmapMargin = { top: 50, right: 0, bottom: 100, left: 100 },
+        heatmapWidth = 800 - heatmapMargin.left - heatmapMargin.right,
+        heatmapHeight = 600 - heatmapMargin.top - heatmapMargin.bottom,
+        gridSize = Math.floor(heatmapWidth / 24),
+        legendElementWidth = gridSize * 2;
+
+      // Select the SVG element by its ID
+      var svgHeatmap = d3.select("#heatmapSvg");
+
+      // Append a group element to the SVG
+      var gHeatmap = svgHeatmap.append("g")
+        .attr("transform", "translate(" + heatmapMargin.left + "," + heatmapMargin.top + ")");
+
+      var xHeatmapScale = d3.scaleBand()
+        .range([0, heatmapWidth])
+        .domain(heatmapData.map(function (d) { return d.gender; }));
+
+      var yHeatmapScale = d3.scaleBand()
+        .range([heatmapHeight, 0])
+        .domain(heatmapData.map(function (d) { return d.sleepDisorder; }));
+
+      gHeatmap.append("g")
+        .attr("class", "x axis")
+        .attr("transform", "translate(0," + heatmapHeight + ")")
+        .call(d3.axisBottom(xHeatmapScale));
+
+      gHeatmap.append("g")
+        .attr("class", "y axis")
+        .call(d3.axisLeft(yHeatmapScale));
+
+      // Add label for the x-axis
+      gHeatmap.append("text")
+        .attr("class", "x axis-label")
+        .attr("text-anchor", "end")
+        .attr("x", heatmapWidth)
+        .attr("y", heatmapHeight + margin.bottom - 10)
+        .text("Gender");
+
+      // Add label for the y-axis (Sleep Disorders)
+      gHeatmap.append("text")
+        .attr("class", "y axis-label")
+        .attr("text-anchor", "end")
+        .attr("y", -margin.left + 10)
+        .attr("x", 2)
+        .attr("dy", ".75em")
+        .text("Sleep Disorders");
+        
+      var colorHeatmapScale = d3.scaleSequential(d3.interpolateBlues)
+        .domain([d3.min(heatmapData, d => d.count), d3.max(heatmapData, d => d.count)]);
+
+      gHeatmap.selectAll(".heatmap")
+        .data(heatmapData)
+        .enter().append("rect")
+        .attr("x", function (d) { return xHeatmapScale(d.gender); })
+        .attr("y", function (d) { return yHeatmapScale(d.sleepDisorder); })
+        .attr("rx", 4)
+        .attr("ry", 4)
+        .attr("class", "heatmap bordered")
+        .attr("width", xHeatmapScale.bandwidth())
+        .attr("height", yHeatmapScale.bandwidth())
+        .style("fill", function (d) { return colorHeatmapScale(d.count); })
+        .on("click", function (event, d) {
+          displayChart(d.gender, d.sleepDisorder);
+          d3.select("#heatmap-tooltip")
+            .style("top", (event.pageY - 10) + "px")
+            .style("left", (event.pageX + 10) + "px");
+        });
+      gHeatmap.selectAll(".heatmap-label")
+        .data(heatmapData)
+        .enter().append("text")
+        .attr("x", d => xHeatmapScale(d.gender) + xHeatmapScale.bandwidth() / 2)
+        .attr("y", d => yHeatmapScale(d.sleepDisorder) + yHeatmapScale.bandwidth() / 2)
+        .attr("dy", ".35em") // vertically center
+        .attr("text-anchor", "middle") // horizontally center
+        .text(d => d.count)
+        .style("font-size", "20px") // adjust font size based on your cell size
+        .style("fill", "black"); // choose a color that is visible over your heatmap colors
+
+      gHeatmap.select(".x.axis").selectAll("text")
+        .style("font-size", "16px"); // Set the desired font size for x-axis labels
+
+      gHeatmap.select(".y.axis").selectAll("text")
+        .style("font-size", "16px"); // Set the desired font size for y-axis labels
+
+      // Add title to the heatmap
+      gHeatmap.append("text")
+        .attr("x", (heatmapWidth / 2))
+        .attr("y", 0 - (margin.top / 2)) // Adjust the position based on the top margin
+        .attr("text-anchor", "middle")
+        .style("font-size", "24px")   // Set the desired title font size
+        .style("font-weight", "bold"); // Optional: make the title bold
+      
+      // Select the SVG element by its ID
+      var svgLegend = d3.select("#heatLegendSvg");
+
+      // Append a group element to the SVG
+      var gLegend = svgLegend.append("g")
+        .attr("transform", "translate(10,10)");
+
+      // Creating a color scale legend
+      var legendWidth = 80, legendHeight = 300;
+
+      var legend = gLegend.append("defs").append("svg:linearGradient")
+        .attr("id", "gradient")
+        .attr("x1", "0%")
+        .attr("y1", "100%")
+        .attr("x2", "0%")
+        .attr("y2", "0%")
+        .attr("spreadMethod", "pad");
+
+      legend.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", d3.interpolateBlues(1))  // Color for the max value
+        .attr("stop-opacity", 1);
+
+      legend.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", d3.interpolateBlues(0))  // Color for the min value
+        .attr("stop-opacity", 1);
+
+      gLegend.append("rect")
+        .attr("width", legendWidth)
+        .attr("height", legendHeight)
+        .style("fill", "url(#gradient)");
+
+      var y = d3.scaleLinear().range([legendHeight, 0])
+        .domain([d3.max(heatmapData, d => d.count), d3.min(heatmapData, d => d.count)]); // Inverted domain for the scale
+
+      var yAxis = d3.axisRight(y).ticks(5);
+
+      gLegend.append("g")
+        .attr("class", "y axis")
+        .attr("transform", "translate(" + legendWidth + ",0)")
+        .call(yAxis);
+
+      function generateChartData(gender, sleepDisorder) {
+        // Filter combinedData for the selected gender and sleep disorder
+        var filteredData = combinedData.filter(d => d.gender === gender && d.sleepDisorders === sleepDisorder);
+
+        // Roll up the data by age to get the count of sleep disorders for each age
+        var countsByAge = d3.rollup(filteredData, vs => vs.length, d => d.age);
+
+        // Convert the Map into an array of objects sorted by age
+        var chartData = Array.from(countsByAge, ([age, count]) => ({ age, count }))
+          .sort((a, b) => a.age - b.age);
+
+        // Split into separate arrays for x and y axis
+        var xAxisData = chartData.map(item => item.age);
+        var seriesData = chartData.map(item => item.count);
+
+        return {
+          xAxisData: xAxisData,
+          seriesData: seriesData
+        };
+      }
+
+      function displayChart(gender, sleepDisorder) {
+        // Get the count directly from the heatmap data
+        var countData = heatmapData.find(function (d) {
+          return d.gender === gender && d.sleepDisorder === sleepDisorder;
+        });
+
+        var totalCount = countData.count; // Total count from the heatmap cell
+
+        // Generate chart data only for the clicked gender and sleep disorder
+        var chartData = generateChartData(gender, sleepDisorder);
+
+        // Update the series data to ensure total count matches the heatmap cell
+        var correctedSeriesData = chartData.seriesData.map(function (count, index) {
+          // Calculate the proportion of each age group relative to the total count
+          var proportion = count / d3.sum(chartData.seriesData);
+          return Math.round(proportion * totalCount); // Distribute the total count proportionally
+        });
+        
+        var myChart = echarts.init(document.getElementById('heatmap-tooltip'));
+
+        var option = {
+          title: {
+            text: `Age Distribution for ${gender}, ${sleepDisorder}`
+          },
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+              type: 'shadow'
+            }
+          },
+          xAxis: {
+            type: 'category',
+            data: chartData.xAxisData,
+            name: 'Age'
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Count'
+          },
+          series: [{
+            data: correctedSeriesData,
+            type: 'bar',
+            barWidth: '60%'
+          }]
+        };
+
+        myChart.setOption(option);
+        d3.select("#heatmap-tooltip").style("visibility", "visible");
+      }
+
+      // line chart
+      // Set up SVG canvas for Line Chart
+      var svgLine = d3.select("#lineChart"),
+        gLine = svgLine.append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+
+
+      // Define the domain for the line chart
+      xLine.domain(d3.extent(experienceData.concat(stressData), d => d.Age));
+      yLine.domain([0, d3.max(experienceData.concat(stressData), d => d.Value)]);
+
+
+
+      // Define the line generators with curve
+      var lineExperience = d3.line()
+        .curve(d3.curveMonotoneX)  // This will smooth the line
+        .x(d => xLine(d.Age))
+        .y(d => yLine(d.Value));
+
+      var lineStress = d3.line()
+        .curve(d3.curveMonotoneX)  // This will smooth the line
+        .x(d => xLine(d.Age))
+        .y(d => yLine(d.Value));
+
+      // Add the experience line with animation
+      gLine.append("path")
+        .datum(experienceData)
+        .attr("class", "line experience-line")
+        .attr("d", lineExperience)
+        .attr("stroke-dasharray", function () {
+          var totalLength = d3.select(this).node().getTotalLength();
+          return totalLength + " " + totalLength;
+        })
+        .attr("stroke-dashoffset", function () {
+          return d3.select(this).node().getTotalLength();
+        })
+        .transition() // Initialize a transition
+        .duration(5000) // Duration of the animation in milliseconds
+        .ease(d3.easeLinear) // The easing function for the transition
+        .attr("stroke-dashoffset", 0); // Final state of the transition
+
+      // Add the stress line with animation
+      gLine.append("path")
+        .datum(stressData)
+        .attr("class", "line stress-line")
+        .attr("d", lineStress)
+        .attr("stroke-dasharray", function () {
+          var totalLength = d3.select(this).node().getTotalLength();
+          return totalLength + " " + totalLength;
+        })
+        .attr("stroke-dashoffset", function () {
+          return d3.select(this).node().getTotalLength();
+        })
+        .transition() // Initialize a transition
+        .duration(5000) // Duration of the animation in milliseconds
+        .ease(d3.easeLinear) // The easing function for the transition
+        .attr("stroke-dashoffset", 0); // Final state of the transition
+      // Add the axes for the line chart
+      gLine.append("g")
+        .attr("transform", "translate(0," + height + ")")
+        .call(xAxisLine);
+
+      gLine.append("g")
+        .call(yAxisLine);
+
+
+      // Add legend for Stress line
+      gLine.append("rect")
+        .attr("x", width - 2)
+        .attr("y", 20)
+        .attr("width", 18)
+        .attr("height", 18)
+        .style("fill", "#EA4335");
+
+      gLine.append("text")
+        .attr("x", width - 4)
+        .attr("y", 29)
+        .attr("dy", ".35em")
+        .style("text-anchor", "end")
+        .text("Stress");
+      // Add legend for Experience line
+      gLine.append("rect")
+        .attr("x", width - 2)
+        .attr("y", 0)
+        .attr("width", 18)
+        .attr("height", 18)
+        .style("fill", "#4285F4");
+
+      gLine.append("text")
+        .attr("x", width - 4)
+        .attr("y", 9)
+        .attr("dy", ".35em")
+        .style("text-anchor", "end")
+        .text("Experience");
+      // Add data points for Experience line
+      gLine.selectAll(".dot-experience")
+        .data(experienceData)
+        .enter().append("circle")
+        .attr("class", "dot-experience")
+        .attr("cx", function(d) { return xLine(d.Age); })
+        .attr("cy", function(d) { return yLine(d.Value); })
+        .attr("r", 3)
+        .style("fill", "#4285F4")
+        .on("mouseover", function(event, d) {
+      d3.select("#tooltip")
+      .style("visibility", "visible")
+      .html("Age: " + d.Age + "<br/>Experience: " + d.Value.toFixed(2))
+      .style("left", (event.pageX) + "px")
+      .style("top", (event.pageY - 28) + "px");
+      })
+      .on("mouseout", function() {
+      d3.select("#tooltip").style("visibility", "hidden");
+      });
+    // Add data points for Stress line
+    gLine.selectAll(".dot-stress")
+      .data(stressData)
+      .enter().append("circle")
+      .attr("class", "dot-stress")
+      .attr("cx", function(d) { return xLine(d.Age); })
+      .attr("cy", function(d) { return yLine(d.Value); })
+      .attr("r", 3)
+      .style("fill", "#EA4335")
+      .on("mouseover", function(event, d) {
+    d3.select("#tooltip")
+      .style("visibility", "visible")
+      .html("Age: " + d.Age + "<br/>Stress: " + d.Value.toFixed(2))
+      .style("left", (event.pageX) + "px")
+      .style("top", (event.pageY - 28) + "px");
+    })
+      .on("mouseout", function() {
+       d3.select("#tooltip").style("visibility", "hidden");
+       });
+    // Assuming your line chart SVG canvas is 'svgLine' and 'gLine' is the group element
+    gLine.append("g")
+      .attr("transform", "translate(0," + height + ")")
+      .call(xAxisLine)
+      .append("text") // Append text to the group element of the x-axis
+      .attr("fill", "#000")
+      .attr("x", width) // Center the text
+      .attr("y", margin.bottom - 5) // Position below the x-axis line
+      .attr("text-anchor", "end")
+      .text("Age")
+      .style("font-size", "20px");
+  
+      gLine.append("g")
+  .call(yAxisLine)
+  .append("text")
+  .attr("fill", "#000")
+  .attr("transform", "rotate(-90)") // Rotate the text for the vertical axis
+  .attr("y", -margin.left) // Position the text along the y-axis
+  .attr("dy", "1em") // Adjust the distance from the axis
+  .attr("text-anchor", "end") // Align the text at the end of the axis
+  .text("Level")
+  .style("font-size", "20px");
+    });
+
+  </script>
+</body>
+
+</html>
